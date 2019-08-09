@@ -1,11 +1,27 @@
 ---
-title: "Armed Conflict Location Event"
-author: "Akira Sasaki"
-date: "11/24/2017"
+title: "Does Social Network Services help people to report violent conflicts more?"
+author: "Akira Sasaki, Eduardo Acostamadiedo, Oliver Recep Çok"
+date: "12/15/2017"
 output: pdf_document
 ---
 
-rm(list = ls())
+## Introduction
+
+Violent conflicts have been continually existing throughout human history, but late into the 20th century the types of conflicts we see are smaller in scale and seem to be less deadly. As we head further into the 21st century the relevance of social media has significantly risen, because more and more people want to be connected to each other. This network of connection has changed people’s ability to instantly communicate with each other across the world. We hypothesize that the more Facebook users in a country the likelihood of internal violent strifes are reported to their social media platform, meaning the world. We expect this correlation to be stronger among the civilian population as we would think that civilians want to be heard and seen by the world whereas the armed groups engaging would want to limit the knowledge of their actions as much as they can. We will use the Armed Conflict Location & Event Data Project (ACLED) dataset and Facebook user data to determine how much the data can explain our hypothesis.
+
+## Data Cleaning
+
+Since we wanted to find a way to measure the correlation of the number of reported conflicts and Facebook penetration, we used the Armed Conflict Location & Event Data Project (ACLED) dataset set to determine which variables would be relevant. We needed to determine a time period to properly compare these conflicts with the Facebook user data. For this reason, we agreed to only select the “YEAR”, “EVENT_TYPE”, “COUNTRY” variables out of the ACLED dataset for our project. The “COUNTRY” variable became our limiting factor as most of the countries in the world do not experience armed conflict.
+
+To make the variables more accessible, we transformed both “YEAR” and “COUNTRY” into “year” and “country” respectively. The most important variable that we had to transform was the “EVENT_TYPE”. We had to determine which armed conflict events would be classified as either a “CIVILIAN INVOLVED CONFLICT” or an “ARMED GROUP CONFLICT”. As “CIVILIAN INVOLVED CONFLICT”, we included “RIOTS/PROTESTS” and “VIOLENCE AGAINST CIVILIANS” from ACLED and the rest were grouped into “ARMED GROUP CONFLICT”. After determining this we then mutated these different types into either one of these two classifications, which would become our dependent variables. We implemented all ofthese changes into a new dataset called ACLED2.
+
+Since there were still around 4000 observations of different instances of conflicts in ACLED2, we wanted to compile the dataset by year and country. We tied all the conflicts in each country for that year into one row. This significantly decreased the number of rows in ACLED2, which increased the readability of the data.
+
+In the GDP dataset we needed to have a variable that could be consistent enough to act as a control, which is why we needed to create a GDP per capita variable for each country overtime. The GDP dataset had countries that were spelled differently from the ACLED2 dataset due to having phrases such as “Republic of” added. In order to solve this issue, we assigned iso3c country codes to each dataset so that we can combine the datesets by the code.
+
+In addition to the already existing variables “CIVILIAN INVOLVED CONFLICT” and “ARMED GROUP CONFLICT”, we wanted to create new variables that represented the rate of conflicts for these countries. By taking the natural log of the percentage of both previous variables, we created the “lnsocial” (for “CIVILIAN INVOLVED CONFLICT”) and the “lnmilitary” (for “ARMED GROUP CONFLICT”) variables for the DATA dataset.
+
+Finally, we needed to add our social media variable to measure the relevance of social media to armed conflicts. Due to not finding enough data for Twitter, we opted to collect Facebook data instead. By using cascading style sheets, we were able to web scrape data from web.archive.org of Facebook users across countries. The data scraped was messy and required us to organize the data into a dataset of the number of Facebook users by country code overtime. To measure the relevance of the number of Facebook users (as the variable “subscriptions”) for each country, we created a new variable called “penetration” to determine the number of Facebook users as a percentage of the population. After recoding a few countries’ names in this dataset, we merged it by year and country code with the DATA dataset.
 
 ```{r setup, include=FALSE, echo=FALSE}
 library(knitr)
@@ -15,6 +31,11 @@ opts_chunk$set(message = FALSE, error = TRUE, fig.pos = 'H', tidy.opts=list(widt
 ```
 
 ```{r library, include=FALSE, echo=FALSE}
+install.packages("shiny", repos = "https://cran.rstudio.com/")
+library(shiny)
+install.packages("shinydashboard", repos = "https://cran.rstudio.com/")
+library(shinydashboard)
+library(scales)
 library(foreign) #read foreign file objects
 install.packages("dplyr", repos = "https://cran.rstudio.com/")
 library(dplyr) #manipulate data
@@ -30,11 +51,11 @@ install.packages("repmis", repos = "https://cran.rstudio.com/")
 library(repmis)
 library(data.table)
 library(magrittr)
-install.packages("stargazer")
+install.packages("stargazer", repos = "https://cran.rstudio.com/")
 library(stargazer)
 install.packages("broom", repos = "https://cran.rstudio.com/")
 library(broom)
-install.packages("arm")
+install.packages("arm", repos = "https://cran.rstudio.com/")
 library(arm)
 library(readr)
 library(readxl)
@@ -53,51 +74,71 @@ install.packages("ROAuth", repos = "https://cran.rstudio.com/")
 library(ROAuth)
 install.packages("stringi", repos = "https://cran.rstudio.com/")
 library(stringi)
+install.packages("plm", repos = "https://cran.rstudio.com/")
+library(plm)
+install.packages("countrycode", repos = "https://cran.rstudio.com/")
+library(countrycode)
+install.packages("plm", repos = "https://cran.rstudio.com/")
+library(plm)
+install.packages("foreign", repos = "https://cran.rstudio.com/")
+library(foreign)
+install.packages("sandwich", repos = "https://cran.rstudio.com/")
+library(sandwich)
+install.packages("lmtest", repos = "https://cran.rstudio.com/")
+library(lmtest)
+install.packages("ggExtra", repos = "https://cran.rstudio.com/")
+library(ggExtra)
+
 ```
 
-```{r data, include=FALSE, echo=FALSE}
-
+```{r DATA, include=FALSE, echo=FALSE}
+#ACLED
 ACLED <- read_csv("~/Armed-Conflict-Location-Event-Data/ACLED-Version-7-All-Africa-1997-2016_csv_dyadic-file.csv")
 ACLED <- subset(ACLED, select = c("YEAR","EVENT_TYPE", "COUNTRY"))
-names(ACLED)[names(ACLED) == 'COUNTRY'] <- 'Country'
+names(ACLED)[names(ACLED) == 'COUNTRY'] <- "country"
 names(ACLED)[names(ACLED) == 'YEAR'] <- 'year'
-ACLED <- ACLED %>% dplyr::group_by(year, Country, EVENT_TYPE) %>% dplyr::summarize(count = n())
+ACLED <- ACLED %>% dplyr::group_by(year, country, EVENT_TYPE) %>% dplyr::summarize(count = n())
+ACLED <- apply(ACLED,2,toupper)
 
-HDI <- read_excel("~/Armed-Conflict-Location-Event-Data/Statistical model/Human development index/HDIversion2.xlsx")
-HDI <- HDI[, -1]
-HDI <- HDI %>% gather(key = year, value = score, -Country)
-#Renaming variables
+cat_social_conflict <- c("RIOTS/PROTESTS", "VIOLENCE AGAINST CIVILIANS")
 
-HDI$Country <- recode(HDI$Country,"Congo"="Republic of Congo")
-HDI$Country <- recode(HDI$Country,"Congo (Democratic Republic of the)"="Democratic Republic of Congo")
-HDI$Country <- recode(HDI$Country,"C�te d'Ivoire"="Ivory Coast")
-HDI$Country <- recode(HDI$Country,"Tanzania (United Republic of)"="Tanzania")
+ACLED <- ACLED %>% 
+  as.data.frame()
+ACLED2 <- ACLED %>% 
+  dplyr::mutate(dep1 = ifelse(EVENT_TYPE %in% cat_social_conflict, "CIVILIAN INVOLVED CONFLICT", "ARMED GROUP CONFLICT" ))
 
+ACLED2$count <- as.numeric(ACLED2$count)
+ACLED2 <- ACLED2 %>% 
+  ungroup() %>%
+  dplyr::group_by(country, year, dep1) %>%
+  dplyr::summarise(dep2 = sum(count)) %>%
+  spread(dep1, dep2)
+ACLED2$iso3c <- countrycode(ACLED2$country, 'country.name','iso3c', warn = T)
 
-
-DATA <- merge(ACLED, HDI, by=c("year","Country"))
-names(DATA)[names(DATA) == 'Country'] <- 'country'
-DATA <- subset(DATA, year >= 2010)
-DATA <- apply(DATA,2,toupper)
-
-
+#GDP per capita
 GDP <- read_excel("~/Armed-Conflict-Location-Event-Data/Statistical model/GDP per capita/GDP.xlsx")
-View(GDP)
+GDP <- apply(GDP,2,toupper)
+GDP <- as.data.frame(GDP)
 GDP$Country <- recode(GDP$Country,"CONGO"="Republic of Congo")
 GDP$Country <- recode(GDP$Country,"CONGO (DEMOCRATIC REPUBLIC OF THE)"="Democratic Republic of Congo")
 GDP$Country <- recode(GDP$Country,"CÔTE D'IVOIRE"="Ivory Coast")
 GDP$Country <- recode(GDP$Country,"TANZANIA (UNITED REPUBLIC OF)"="Tanzania")
-
-GDP <- GDP %>% gather(key = year, value = score, -Country)
-names(GDP)[names(GDP)== "score"] <- "GDP"
+GDP <- as.data.frame(GDP)
 names(GDP)[names(GDP)== "Country"] <- "country"
-GDP <- apply(GDP,2,toupper)
-DATA <- merge(DATA, GDP, by=c("year","country"))
+names(GDP)[names(GDP)== "score"] <- "GDP"
+GDP <- GDP %>% gather(key = year, value = GDP, -country)
+GDP$iso3c <- countrycode(GDP$country, 'country.name','iso3c', warn = T)
+  
+DATA <- merge(ACLED2, GDP, by=c("year","iso3c"))
 
+#Dependent variables natural log 
+DATA$`ARMED GROUP CONFLICT` <- DATA$`ARMED GROUP CONFLICT` %>% as.numeric()
+DATA$`CIVILIAN INVOLVED CONFLICT`<- DATA$`CIVILIAN INVOLVED CONFLICT` %>% as.numeric()
+DATA$lnmilitary <- log(DATA$`ARMED GROUP CONFLICT`)
+DATA$lnsocial <- log(DATA$`CIVILIAN INVOLVED CONFLICT`)
 
-```
+#facebook
 
-```{r facebook data, include=FALSE, echo=FALSE}
 #2010 Country names
 url <- "https://web.archive.org/web/20101008034936/http://internetworldstats.com/africa.htm"
 css <- "img+ font b"
@@ -248,22 +289,211 @@ m2016$year="2016"
 facebook <- rbind(m2010, m2011, m2012, m2013, m2014, m2015, m2016) 
 facebook$data <- str_replace_all(facebook$data, ",", "")
 facebook$subscription <- stri_extract_first_regex(facebook$data, "[0-9]+")
-facebook$penetration <- str_extract(facebook$data, "((\\d\\.\\d+)\\%)")
+facebook$penetration <- str_extract(facebook$data, "((\\d+\\.*\\d*)\\%)")
 facebook$penetration <- str_replace_all(facebook$penetration, "%", "")
 facebook$data <- NULL
+facebook$country <- gsub("EQUATORIAL\nGUINEA","EQUATORIAL GUINEA", facebook$country) 
+facebook$country <-gsub("CENTRAL AFRICAN\n REPUBLIC","CENTRAL AFRICAN REPUBLIC", facebook$country) 
+facebook <- data.frame(lapply(facebook, as.character), stringsAsFactors=FALSE)
+facebook$iso3c <- countrycode(facebook$country, 'country.name', 
+                             'iso3c', warn = T)
+facebook<-data.frame(facebook)
 
-facebook$country <- recode(facebook$country ,"CONGO"="Republic of Congo")
-facebook$country <- recode(facebook$country ,"CONGO, Democratic Republic of the, (ex-ZAIRE)"="Democratic Republic of Congo")
-facebook$country  <- recode(facebook$country ,"COTE D'IVOIRE (Ivory Coast)"="Ivory Coast")
-facebook$country <- recode(facebook$country ,"TANZANIA"="Tanzania")
+DATA <- merge(DATA, facebook, by=c("year","iso3c"))
+DATA <- subset(DATA, select = -c(country.y, country))
+DATA$penetration <- as.numeric(DATA$penetration)
+names(DATA)[names(DATA)== "country.x"] <- "country"
 
-DATA <- merge(DATA, facebook, by=c("year","country"))
+#log GDP
+DATA$GDP <- as.numeric(as.character(DATA$GDP))
+DATA$lnGDP <- log1p(DATA$GDP)
 ```
 
-table(ACLED$Country)
+```{r 2010 civconflict, include=FALSE, echo=FALSE}
+  
+DATA2010 <-DATA
+DATA2010 <- DATA2010[ which(DATA2010$year==2010), ]
+DATA2010$GDP<-as.numeric(DATA2010$GDP) 
+DATA2010$subscription<-as.numeric(DATA2010$subscription) 
+DATA2010$penetration<-as.numeric(DATA2010$penetration) 
+names(DATA2010)[names(DATA2010) == "CIVILIAN INVOLVED CONFLICT"] <- "CIVILIANINVOLVEDCONFLICT"
+names(DATA2010)[names(DATA2010) == "ARMED GROUP CONFLICT"] <- "ARMEDGROUPCONFLICT"
+  
+DATA2015 <-DATA
+DATA2015 <- DATA2015[ which(DATA2015$year==2015), ]
+DATA2015$GDP<-as.numeric(DATA2015$GDP) 
+DATA2015$subscription<-as.numeric(DATA2015$subscription) 
+DATA2015$penetration<-as.numeric(DATA2015$penetration) 
+names(DATA2015)[names(DATA2015) == "CIVILIAN INVOLVED CONFLICT"] <- "CIVILIANINVOLVEDCONFLICT"
+names(DATA2015)[names(DATA2015) == "ARMED GROUP CONFLICT"] <- "ARMEDGROUPCONFLICT"
+```
+  
+## Explanatory Statitical Analysis
+  
+In the next section, we explore the relationship between social media and reporting of conflict events in two levels of analysis. The first level is a time comparison between 2010 and 2015. This contrast considers that the number of Facebook users increased almost 192% in this short time. The second level is the type of conflict divided whether the conflict was civil society related or armed actor related. Between 2010 and 2015, civilian associated conflicts increased by 225% and armed actor associated conflicts increased by 291%.
 
-facebook$country <- table(country) # A will be rows, B will be columns
-mytable
+Although the reporting of both types of conflict increased in similar ways, as it will be shown, it seems that in contrast to armed groups conflict events, civil society events are more associated with the increase of Facebook users in a country.
 
+The 2015 civil society conflict events graph has a steeper slope than the 2010 plot, indicating that there is more of an association between Facebook users and reports.
+
+When looking at the 2010 and 2015 graphs of the armed group conflicts, the steepness of the line is almost the same. For this reason, it seems that there was no significant association between Facebook users and reporting of armed groups events.
+  
+```{r summary statistics 2010, echo=FALSE, results='asis'}
+mydata <- DATA2010
+stargazer(mydata [c("ARMEDGROUPCONFLICT","CIVILIANINVOLVEDCONFLICT","GDP","subscription")],header = FALSE, float = TRUE, title="Descriptive statistics 2010", digits=1, out="html",covariate.labels = c("Armed actors events","Civilian events","GDP per cap.","% of Facebook users"))
+  
+mydata2 <- DATA2015
+stargazer(mydata2 [c("ARMEDGROUPCONFLICT","CIVILIANINVOLVEDCONFLICT","GDP","subscription")], header = FALSE, float = TRUE, title="Descriptive statistics 2015", digits=1, out="html",covariate.labels = c("Armed actors events","Civilian events","GDP per cap.","% of Facebook users"))
+```
+
+
+```{r civil conflict plot 2010, echo=FALSE, results='asis', warning = FALSE}
+options(scipen=999) 
+theme_set(theme_bw())
+g <- ggplot(DATA2010, aes(x=subscription,y=CIVILIANINVOLVEDCONFLICT)) + 
+  geom_point(aes(size=GDP)) + 
+  geom_smooth(method="lm", se=F)+ 
+  labs(subtitle="Facebook users vs. civil society conflict events", 
+       y="Civil soc conflict", 
+       x="Facebook", 
+       title="Figure 1. Civil conflicts by facebook users 2010", 
+       caption = "Source: ACLED, Internet Stats")+
+  scale_x_log10()
+plot(g)
+```
+
+```{r 2015 civilian conflict, echo=FALSE, results='asis', warning = FALSE}
+options(scipen=999) 
+theme_set(theme_bw())
+a <- ggplot(DATA2015, aes(x=subscription,y=CIVILIANINVOLVEDCONFLICT)) + 
+  geom_point(aes(size=GDP)) + 
+  geom_smooth(method="lm", se=F)+ 
+  labs(subtitle="Facebook users vs. civil society conflict events", 
+       y="Civil soc conflict", 
+       x="Facebook", 
+       title="Figure 2. Civil conflicts by facebook users 2015", 
+       caption = "Source: ACLED, Internet Stats")+
+  scale_x_log10()
+plot(a)
+```
+
+```{r armed group conflict plot 2010, echo=FALSE, results='asis', warning = FALSE}
+
+options(scipen=999) 
+theme_set(theme_bw())
+b <- ggplot(DATA2010, aes(x=subscription,y=ARMEDGROUPCONFLICT)) + 
+  geom_point(aes(size=GDP)) + 
+  geom_smooth(method="lm", se=F)+ 
+  labs(subtitle="Facebook users vs. armed group conflict events", 
+       y="Armed group conflic", 
+       x="Facebook", 
+       title="Figure 3. Armed group conflicts by facebook users 2010", 
+       caption = "Source: ACLED, Internet Stats")+
+  scale_x_log10()
+plot(b)
+```
+
+```{r armed group conflict plot 2015, echo=FALSE, results='asis', warning = FALSE}
+options(scipen=999) 
+theme_set(theme_bw())
+c <- ggplot(DATA2015, aes(x=subscription,y=ARMEDGROUPCONFLICT)) + 
+  geom_point(aes(size=GDP)) + 
+  geom_smooth(method="lm", se=F)+ 
+  labs(subtitle="Facebook users vs. armed group conflict events", 
+       y="Armed group conflic", 
+       x="Facebook", 
+       title="Figure 4. Armed group conflicts by facebook users 2015", 
+       caption = "Source: ACLED, Internet Stats")+
+  scale_x_log10()
+plot(c)
+```
+
+```{r regressions output, include=FALSE, echo=FALSE}
+#Civilian regressions
+#2010
+reg10soc = lm(lnsocial ~ penetration + lnGDP, data= DATA2010)
+m1<-coeftest(reg10soc, vcov = vcovHC(reg10soc, "HC1"))
+#2015
+reg15soc = lm(lnsocial ~ penetration + lnGDP, data= DATA2015)
+m2<-coeftest(reg15soc, vcov = vcovHC(reg15soc, "HC1"))
+
+#Armed group regressions
+#2010
+reg10armed = lm(lnmilitary ~ penetration + lnGDP, data= DATA2010)
+m3<-coeftest(reg10armed, vcov = vcovHC(reg10armed, "HC1"))
+#2015
+reg15armed = lm(lnmilitary ~ penetration + lnGDP, data= DATA2015)
+m4<-coeftest(reg15armed, vcov = vcovHC(reg15armed, "HC1"))
+
+```
+
+## Regression Analysis
+
+In our hypothesis, the prevalence of Facebook in a society should increase the number of reported conflict cases. In particular, between armed group conflicts and civilian conflicts (riots/protests and violence against civilians), we expect a strong correlation in civilian conflicts due to the nature of these conflicts. For civilian conflicts, it is important that people’s voices are heard and attract attention.
+
+Initially, we examine the effect of Facebook penetration on the number of reported conflict cases with an OLS regression. We divide the conflicts into two different groups: civilian conflicts and armed group conflicts. Then, we applied the regression respectively. Also, for the sake of comparison, we decided to analyze the data from two different years: 2010 and 2015. The dependent variable is the number of reported conflict cases and our explanatory variable is the penetration of Facebook in respective African countries. As a control variable, we included the natural logarithm of GDP per capita as we consider the wealth at an individual level correlates with the penetration rate of Facebook as well as the frequency of conflicts. The following tables are the results of respective OLS regression.
+
+```{r actual reg output1, echo=FALSE, results='asis'}
+stargazer(m1, m2, 
+          header = FALSE, float = TRUE,
+          report = ('vc*p'),
+          title            = "Civilan Conflicts",
+          dep.var.labels=c("Civilian events 2010 and 2015"),
+          covariate.labels=c("Facebook penetration","GDP per cap. (log)"),
+          dep.var.labels.include = FALSE,
+          column.labels = c("2010", "2015"),
+          out="html")
+```
+
+Table 3 illustrates the results of the OLS regression on the civilian conflict group.The coefficient of 2010 is bigger than that of 2015, meaning the Facebook penetration in 2010 has a stronger magnitude on the increase of civilian conflict cases. Both coefficients are statistically significant, in particular for the 2015 data. On the other hand, the results show the impact of GDP per capita on the number of civilian conflicts are negative in both years. The magnitude increase in 2015 and the coefficients are statistically significant for both years.
+
+```{r actual reg output2, echo=FALSE, results='asis'}
+stargazer(m3, m4, 
+          header = FALSE, float = TRUE,
+          report = ('vc*p'),
+          title            = "Armed Group Conflicts",
+          covariate.labels=c("Facebook penetration","GDP per cap. (log)"),
+          dep.var.labels.include = FALSE,
+          column.labels = c("2010", "2015"),
+          out = "html")
+```
+
+Table 4 describes the results for the armed group conflicts. The coefficients of Facebook penetration are both positive but the 2015 data is more statistically significant than the 2010. Also, the coefficient halved from 2010 to 2015. GDP per capita is, in contrast, negative for both years and slightly less statistically significant than the previous model.
+
+We admit those regressions are susceptible to a omitted variable bias. We only included one control variable in the model, but we included many different countries, which means there there could be a number of factors that affect it. In order to control those different factors, we decided to do two-way fixed effect regression between countries and years. The result is below in Table 5.
+
+```{r fixed effect regression, include=FALSE, echo=FALSE}
+#see https://cran.r-project.org/web/packages/plm/vignettes/plm.pdf
+fe.lnmilitary <- plm(lnmilitary ~ penetration + lnGDP, index=c("country", "year"), data=DATA, effect="twoways")
+fe.lnsocial <- plm(lnsocial ~ penetration + lnGDP, index=c("country", "year"), data=DATA, effect="twoways")
+summary(fe.lnsocial)
+``` 
+
+```{r regression table, echo=FALSE, results='asis'}
+stargazer(fe.lnmilitary, fe.lnsocial,
+          header = FALSE, float = TRUE,
+          report = ('vc*p'),
+          title            = "Two-way Fixed Effect Regression",
+          covariate.labels = c("Facebook penetration", "GDP per cap. (log)"),
+          dep.var.caption = "Conflict type",
+          dep.var.labels.include = FALSE,
+          column.labels = c("Armed Group Conflict", "Civilian Conflict"),
+          out = "html"
+)
+``` 
+
+Now the results have changed significantly. The coefficients of Facebook penetration became much smaller. It is possible to see the number get bigger from 2010 to 2015, which is in line with our assumption that the more facebook prevails the more people would report, both coefficients are statistically insignificant. On the other hand, the coefficients of GDP per capita became much more statistically significant. The magnitudes are smaller than those in the previous models but GDP per capita seems to have a negative correlation with the number of reported conflict cases.
+
+Also, we found an issue with our model as well. The adjusted-R square became negative in this regression, indicating possibly a misspecification in the model. Also, F-statistics are small for both groups, meaning the model has a space of improvement. In the following, we discuss the possible correction in our model.
+
+## Conclusion and Future Study
+
+In our hypothesis, we expected the number of reported conflict cases would positively correlate with the Facebook penetration because it means that people have an easier time with more channels to report these conflicts. Also, our assumption was that we would see a stronger correlation for civilian conflicts than for armed group conflicts. However, according to our two-way fixed effect analysis, although we see positive correlations for both groups, they were not statitically significant.
+
+We acknowledge flaws in our model. Firstly, we only use GDP per capita as a control variable but this model is susceptible to an omitted variable bias. Even though we had used the two-way fixed effect model, still non-time variant and non-country variant variables can affect the result. We consider using types of political institution or internet/mobile penetration as control variables but for the time constraint, we needed to compromise on collecting data.
+
+Another possible issue with the model specification. The adjusted R-square is negative, implying the model is being penalized substantially from including many irrelevant independent variables. In our future study, we would further explore different explanatory variables.
+
+At last, we actually preferred using twitter penetration instead of the Facebook since the tool seems more suitable for the use to report. However, it was extremely difficult to obtain the data for our analysis and we also needed to comprise on this account. If time allowed, we would have explored the effect of twitter penetration on the number of reported cases.
 
 
